@@ -8,24 +8,25 @@
 #include <ctype.h>
 #include <string.h>
 #include <pthread.h>
+#include <errno.h> // Importante para errno e EINTR
 
 FILE * debugfile;
 
-// Locks two board positions in a specific order to avoid deadlocks
+// --- FUNÇÕES HELPER DO BOARD (Mantidas iguais) ---
+// (lock_two_positions, unlock_two_positions, find_and_kill_pacman, 
+// get_board_index, is_valid_position, sleep_ms ... MANTÉM ESTAS IGUAIS)
+
 static void lock_two_positions(board_t* board, int idx1, int idx2) {
     if (idx1 == idx2) {
         pthread_mutex_lock(&board->board[idx1].mutex);
         return;
     }
-
     int first = (idx1 < idx2) ? idx1 : idx2;
     int second = (idx1 < idx2) ? idx2 : idx1;
-
     pthread_mutex_lock(&board->board[first].mutex);
     pthread_mutex_lock(&board->board[second].mutex);
 }
 
-// Unlocks two previously locked board positions
 static void unlock_two_positions(board_t* board, int idx1, int idx2) {
     pthread_mutex_unlock(&board->board[idx1].mutex);
     if (idx1 != idx2) {
@@ -33,7 +34,6 @@ static void unlock_two_positions(board_t* board, int idx1, int idx2) {
     }
 }
 
-// Checks if a Pacman exists at the given coordinates and kills it if found
 static int find_and_kill_pacman(board_t* board, int new_x, int new_y) {
     for (int p = 0; p < board->n_pacmans; p++) {
         pacman_t* pac = &board->pacmans[p];
@@ -46,12 +46,10 @@ static int find_and_kill_pacman(board_t* board, int new_x, int new_y) {
     return VALID_MOVE;
 }
 
-// Helper function to calculate the 1D array index from 2D coordinates
 static inline int get_board_index(board_t* board, int x, int y) {
     return y * board->width + x;
 }
 
-// Helper function to check if coordinates are within the board boundaries
 static inline int is_valid_position(board_t* board, int x, int y) {
     return (x >= 0 && x < board->width) && (y >= 0 && y < board->height);
 }
@@ -73,7 +71,6 @@ static void find_first_free_pos(board_t* board, int* x, int* y) {
     }
 }
 
-// Makes the current thread sleep for the specified number of milliseconds
 void sleep_ms(int milliseconds) {
     struct timespec ts;
     ts.tv_sec = milliseconds / 1000;
@@ -81,10 +78,12 @@ void sleep_ms(int milliseconds) {
     nanosleep(&ts, NULL);
 }
 
-// Handles the movement logic for a Pacman, including collisions and point collection
+// ... (Funções de move_pacman, move_ghost, etc. MANTÉM IGUAIS ATÉ read_file_content) ...
+// (Estou a omitir as funções de movimento para poupar espaço, elas não mudaram. 
+//  Certifica-te que as manténs no ficheiro!)
+
 int move_pacman(board_t* board, int pacman_index, command_t* command) {
     if (pacman_index < 0) return DEAD_PACMAN;
-    
     pacman_t* pac = &board->pacmans[pacman_index];
     if (!pac->alive) return DEAD_PACMAN;
 
@@ -170,7 +169,6 @@ int move_pacman(board_t* board, int pacman_index, command_t* command) {
     return ret_val;
 }
 
-// Calculates the final destination for a 'charged' move (straight line until obstacle)
 static int get_charged_dest(board_t* board, int x, int y, char direction, int* dest_x, int* dest_y) {
     *dest_x = x;
     *dest_y = y;
@@ -216,7 +214,6 @@ static int get_charged_dest(board_t* board, int x, int y, char direction, int* d
     return 0;
 }   
 
-// Executes the movement logic for a ghost in 'charged' state
 int move_ghost_charged(board_t* board, int ghost_index, char direction) {
     ghost_t* ghost = &board->ghosts[ghost_index];
     int cur_x = ghost->pos_x;
@@ -262,7 +259,6 @@ int move_ghost_charged(board_t* board, int ghost_index, char direction) {
     return result;
 }
 
-// Executes a standard move command for a ghost
 int move_ghost(board_t* board, int ghost_index, command_t* command) {
     ghost_t* ghost = &board->ghosts[ghost_index];
     int current_x = ghost->pos_x;
@@ -343,7 +339,6 @@ int move_ghost(board_t* board, int ghost_index, command_t* command) {
     return result;
 }
 
-// Sets the specified Pacman as dead and removes it from the board
 void kill_pacman(board_t* board, int pacman_index) {
     debug("Killing %d pacman\n\n", pacman_index);
     pacman_t* pac = &board->pacmans[pacman_index];
@@ -353,7 +348,6 @@ void kill_pacman(board_t* board, int pacman_index) {
     pac->alive = 0;
 }
 
-// Initializes the Pacman structure (used for static loading)
 int load_pacman(board_t* board, int points) {
     board->pacmans[0].pos_x = -1;
     board->pacmans[0].pos_y = -1;
@@ -362,7 +356,7 @@ int load_pacman(board_t* board, int points) {
     return 0;
 }
 
-// Initializes Ghost structures with predefined moves (used for static loading)
+// ... (load_ghost, load_level mantêm-se iguais) ...
 int load_ghost(board_t* board) {
     board->board[3 * board->width + 1].content = 'M'; 
     board->ghosts[0].pos_x = 1;
@@ -393,7 +387,6 @@ int load_ghost(board_t* board) {
     return 0;
 }
 
-// Loads a default static level into the board
 int load_level(board_t *board, int points) {
     board->height = 5;
     board->width = 10;
@@ -435,23 +428,32 @@ int load_level(board_t *board, int points) {
     return 0;
 }
 
-// Reads the full content of a file into a dynamically allocated string
+// --- LEITURA DE FICHEIROS ROBUSTA ---
 char* read_file_content(const char* filename) {
     int fd = open(filename, O_RDONLY);
     if (fd < 0) return NULL; 
     
-    char *buffer = calloc(4096, sizeof(char)); 
+    int capacity = 4096;
+    char *buffer = calloc(capacity, sizeof(char)); 
     if (!buffer) { close(fd); return NULL; }
 
-    int bytes_lidos = read(fd, buffer, 4095);
-    if (bytes_lidos <= 0) { free(buffer); close(fd); return NULL; }
+    int total_lido = 0;
+    int n;
 
-    buffer[bytes_lidos] = '\0';
+    while (total_lido < capacity - 1) {
+        n = read(fd, buffer + total_lido, capacity - 1 - total_lido);
+        if (n == -1) {
+            if (errno == EINTR) continue;
+            free(buffer); close(fd); return NULL;
+        }
+        if (n == 0) break;
+        total_lido += n;
+    }
+    buffer[total_lido] = '\0';
     close(fd); 
     return buffer;
 }
 
-// Checks if a position on the board is valid for placing an entity
 int is_valid_pos(board_t *board, int x, int y) {
     if (!board || !board->board) return 0;
     if (!is_valid_position(board, x, y)) return 0;
@@ -460,8 +462,7 @@ int is_valid_pos(board_t *board, int x, int y) {
     if (pos == 'M' || pos == 'P') return 0;
     return 1;
 }
-    
-// Parses a single line from a file into a move command structure
+
 int parse_move_line(char *linha, command_t *moves_array, int *n_moves) {
     if (*n_moves >= MAX_MOVES) return 0;
 
@@ -488,7 +489,6 @@ int parse_move_line(char *linha, command_t *moves_array, int *n_moves) {
     return 0;
 }
 
-// Loads entity (Pacman/Ghost) configuration from a file
 int load_entity_file(board_t *board, const char* filename, int index, int is_pacman, int points) {
     char *buffer = read_file_content(filename);
 
@@ -529,6 +529,8 @@ int load_entity_file(board_t *board, const char* filename, int index, int is_pac
     *e_n_moves = 0;
     *e_waiting = 0;
     *e_passo = 0;
+    *e_pos_x = -1; // Flag para detetar falta de POS
+    *e_pos_y = -1;
 
     char *saveptr; 
     char *linha = strtok_r(buffer, "\n", &saveptr);
@@ -566,10 +568,24 @@ int load_entity_file(board_t *board, const char* filename, int index, int is_pac
     }
     
     free(buffer);
+
+    // Fallback se POS não foi definido
+    if (*e_pos_x == -1 || *e_pos_y == -1) {
+        find_first_free_pos(board, e_pos_x, e_pos_y);
+        if (is_valid_position(board, *e_pos_x, *e_pos_y)) {
+            int idx = *e_pos_y * board->width + *e_pos_x;
+            if (is_pacman) {
+                board->board[idx].content = 'P';
+                board->board[idx].has_dot = 0;
+            } else {
+                board->board[idx].content = 'M';
+            }
+        }
+    }
+
     return 0;
 }
 
-// Parses lines from the level file that specify entity files (PAC/MON)
 void process_entities(board_t *board, char *linha, int tipo, int points) {
     char temp_name[50];
     int offset = 0;
@@ -598,7 +614,6 @@ void process_entities(board_t *board, char *linha, int tipo, int points) {
     }
 }
 
-// Loads the level configuration and map from a filename
 int load_level_filename(board_t *board, const char *filename, int points) {
     char *buffer = read_file_content(filename);
     if (!buffer) return 1;
@@ -656,12 +671,20 @@ int load_level_filename(board_t *board, const char *filename, int points) {
         linha = strtok_r(NULL, "\n", &saveptr);
     }
     
+    // Se não havia linha PAC
+    if (board->pacmans == NULL) {
+        board->n_pacmans = 1;
+        board->pacmans = calloc(1, sizeof(pacman_t));
+        load_pacman(board, points); 
+    }
+
     pacman_t *pac = board->pacmans;
     if (pac->n_moves == 0 || (pac->pos_x == -1 && pac->pos_y == -1)) { 
         find_first_free_pos(board, &pac->pos_x, &pac->pos_y);
         int idx = pac->pos_y * board->width + pac->pos_x;
         if (is_valid_position(board, pac->pos_x, pac->pos_y)) {
             board->board[idx].content = 'P';
+            board->board[idx].has_dot = 0;
         }
     }
 
@@ -669,7 +692,7 @@ int load_level_filename(board_t *board, const char *filename, int points) {
     return 0;
 }
 
-// Frees all allocated memory for the level and destroys mutexes
+// ... (unload_level, debug, print_board MANTÉM IGUAIS) ...
 void unload_level(board_t * board) {
     if (board->board) {
         for(int i = 0; i < board->width * board->height; i++) {
@@ -681,17 +704,14 @@ void unload_level(board_t * board) {
     free(board->ghosts);
 }
 
-// Opens the debug log file for writing
 void open_debug_file(char *filename) {
     debugfile = fopen(filename, "w");
 }
 
-// Closes the debug log file
 void close_debug_file() {
     fclose(debugfile);
 }
 
-// Writes formatted output to the debug log file
 void debug(const char * format, ...) {
     va_list args;
     va_start(args, format);
@@ -700,7 +720,6 @@ void debug(const char * format, ...) {
     fflush(debugfile);
 }
 
-// Prints the current state of the board and entities to the debug log
 void print_board(board_t *board) {
     if (!board || !board->board) {
         debug("[%d] Board is empty or not initialized.\n", getpid());

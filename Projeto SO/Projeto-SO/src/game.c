@@ -23,6 +23,7 @@
 
 #define BUFFER_SIZE 10
 
+// --- ESTRUTURAS EX 1.2 (Produtor-Consumidor) ---
 typedef struct {
     char req_pipe_path[40];
     char notif_pipe_path[40];
@@ -38,6 +39,85 @@ pthread_mutex_t buf_mutex;
 
 char global_levels_dir[256];
 
+// --- ESTRUTURAS EX 2 (Sinal SIGUSR1 - Top 5) ---
+volatile sig_atomic_t sigusr1_received = 0;
+
+// Nova estrutura para guardar o jogo E o ID real do cliente
+typedef struct {
+    game_state_t *state;
+    int real_client_id;
+} active_game_slot_t;
+
+active_game_slot_t *active_games; 
+int max_games_limit = 0;
+pthread_mutex_t active_games_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct {
+    int id;
+    int score;
+} client_score_t;
+
+// --- FUNÇÕES AUXILIARES EX 2 ---
+
+int compare_scores(const void *a, const void *b) {
+    client_score_t *s1 = (client_score_t *)a;
+    client_score_t *s2 = (client_score_t *)b;
+    return s2->score - s1->score; 
+}
+
+void handle_sigusr1(int sig) {
+    (void)sig;
+    sigusr1_received = 1;
+}
+
+// Extrai o primeiro número encontrado no nome do pipe
+int extract_id_from_pipe(const char *pipe_path) {
+    int id = -1;
+    for (int i = 0; pipe_path[i] != '\0'; i++) {
+        if (pipe_path[i] >= '0' && pipe_path[i] <= '9') {
+            id = atoi(&pipe_path[i]);
+            break; 
+        }
+    }
+    return id;
+}
+
+void generate_top5_file() {
+    FILE *f = fopen("top_scores.txt", "w");
+    if (!f) return;
+
+    client_score_t *scores = malloc(sizeof(client_score_t) * max_games_limit);
+    if (!scores) { fclose(f); return; }
+    
+    int count = 0;
+
+    pthread_mutex_lock(&active_games_mutex);
+    for (int i = 0; i < max_games_limit; i++) {
+        if (active_games[i].state != NULL && active_games[i].state->board != NULL) {
+            scores[count].id = active_games[i].real_client_id; // ID real
+            if (active_games[i].state->board->n_pacmans > 0)
+                scores[count].score = active_games[i].state->board->pacmans[0].points;
+            else
+                scores[count].score = 0;
+            count++;
+        }
+    }
+    pthread_mutex_unlock(&active_games_mutex);
+
+    qsort(scores, count, sizeof(client_score_t), compare_scores);
+
+    fprintf(f, "=== TOP 5 CLIENTS ===\n");
+    int limit = (count < 5) ? count : 5;
+    for (int i = 0; i < limit; i++) {
+        fprintf(f, "Client ID: %d | Score: %d\n", scores[i].id, scores[i].score);
+    }
+    
+    printf("[SERVER] SIGUSR1 recebido. Ficheiro 'top_scores.txt' gerado.\n");
+    free(scores);
+    fclose(f);
+}
+
+// --- ESTRUTURAS DE JOGO ---
 typedef struct {
     game_state_t *state;
     int req_fd;
@@ -292,13 +372,20 @@ int find_levels(const char *dirpath, char lista[MAX_LEVELS][MAX_FILENAME]) {
     return count;
 }
 
-int run_game(board_t *board, int req_fd, int notif_fd) {
+// --- FUNÇÃO DE JOGO (Atualizada para Ex 2) ---
+int run_game(board_t *board, int req_fd, int notif_fd, int slot_id, int client_id) {
     game_state_t state = {
         .board = board, .running = 1, .outcome = CONTINUE_PLAY,
         .pending_input = '\0', .save_request = 0
     };
     pthread_mutex_init(&state.mutex, NULL);
     pthread_cond_init(&state.input_cond, NULL);
+
+    // Registar o jogo na lista global
+    pthread_mutex_lock(&active_games_mutex);
+    active_games[slot_id].state = &state;
+    active_games[slot_id].real_client_id = client_id;
+    pthread_mutex_unlock(&active_games_mutex);
 
     pthread_t render_tid, pacman_tid;
     pthread_t ghost_tids[MAX_GHOSTS];
@@ -319,6 +406,12 @@ int run_game(board_t *board, int req_fd, int notif_fd) {
     for (int g = 0; g < board->n_ghosts; g++) pthread_join(ghost_tids[g], NULL);
     pthread_join(render_tid, NULL);
 
+    // Remover jogo da lista global
+    pthread_mutex_lock(&active_games_mutex);
+    active_games[slot_id].state = NULL;
+    active_games[slot_id].real_client_id = -1;
+    pthread_mutex_unlock(&active_games_mutex);
+
     int outcome = state.outcome;
     pthread_mutex_destroy(&state.mutex);
     pthread_cond_destroy(&state.input_cond);
@@ -329,8 +422,16 @@ void cleanup_server(const char* fifo_name) {
     unlink(fifo_name);
 }
 
+// --- WORKER THREAD ---
 void *worker_thread(void *arg) {
-    (void)arg;
+    int my_id = *(int*)arg; 
+    free(arg);
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR1);
+    pthread_sigmask(SIG_BLOCK, &mask, NULL);
+
     while (1) {
         sem_wait(&sem_full);
         pthread_mutex_lock(&buf_mutex);
@@ -356,13 +457,18 @@ void *worker_thread(void *arg) {
         int n_niveis = find_levels(".", lista_niveis);
         int points = 0;
 
+        // Extrair ID do pipe
+        int real_id = extract_id_from_pipe(req.req_pipe_path);
+        if (real_id == -1) real_id = my_id;
+
         for (int i = 0; i < n_niveis; i++) {
             if (fcntl(client_req_fd, F_GETFD) == -1) break;
             board_t game_board = {0};
             if (load_level_filename(&game_board, lista_niveis[i], points) != 0) continue;
             strncpy(game_board.level_name, lista_niveis[i], 255);
             
-            int outcome = run_game(&game_board, client_req_fd, client_notif_fd);
+            int outcome = run_game(&game_board, client_req_fd, client_notif_fd, my_id, real_id);
+            
             points = (game_board.n_pacmans > 0) ? game_board.pacmans[0].points : points;
             unload_level(&game_board);
 
@@ -375,6 +481,7 @@ void *worker_thread(void *arg) {
     return NULL;
 }
 
+// --- MAIN ---
 int main(int argc, char** argv) {
     signal(SIGPIPE, SIG_IGN);
 
@@ -385,6 +492,7 @@ int main(int argc, char** argv) {
 
     strncpy(global_levels_dir, argv[1], 255);
     int max_games = atoi(argv[2]);
+    max_games_limit = max_games;
     char *server_fifo_name = argv[3];
 
     if (chdir(global_levels_dir) != 0) {
@@ -395,10 +503,22 @@ int main(int argc, char** argv) {
     sem_init(&sem_empty, 0, BUFFER_SIZE);
     sem_init(&sem_full, 0, 0);
     pthread_mutex_init(&buf_mutex, NULL);
+    
+    // Alocar array global de jogos ativos
+    active_games = calloc(max_games, sizeof(active_game_slot_t));
+
+    // Configurar Signal Handler
+    struct sigaction sa;
+    sa.sa_handler = handle_sigusr1;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; 
+    sigaction(SIGUSR1, &sa, NULL);
 
     pthread_t *workers = malloc(sizeof(pthread_t) * max_games);
     for (int i = 0; i < max_games; i++) {
-        pthread_create(&workers[i], NULL, worker_thread, NULL);
+        int *arg = malloc(sizeof(int));
+        *arg = i;
+        pthread_create(&workers[i], NULL, worker_thread, arg);
     }
 
     if (mkfifo(server_fifo_name, 0666) == -1 && errno != EEXIST) {
@@ -406,16 +526,37 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    printf("[SERVIDOR] A aguardar clientes em %s (Max: %d)...\n", server_fifo_name, max_games);
+    // Mostra PID para o user saber qual matar
+    printf("[SERVIDOR] A aguardar clientes em %s (Max: %d) | PID: %d\n", server_fifo_name, max_games, getpid());
     srand((unsigned int)time(NULL));
     open_debug_file("server_debug.log");
 
     while (1) {
         int server_fd = open(server_fifo_name, O_RDONLY);
-        if (server_fd == -1) continue;
+        if (server_fd == -1) {
+            if (errno == EINTR) {
+                if (sigusr1_received) {
+                    generate_top5_file();
+                    sigusr1_received = 0;
+                }
+                continue;
+            }
+            continue; 
+        }
 
         char op, req_pipe[40], notif_pipe[40];
-        if (read(server_fd, &op, 1) > 0) {
+        int n = read(server_fd, &op, 1);
+        
+        if (n == -1 && errno == EINTR) {
+             if (sigusr1_received) {
+                generate_top5_file();
+                sigusr1_received = 0;
+            }
+            close(server_fd);
+            continue;
+        }
+
+        if (n > 0) {
             read(server_fd, req_pipe, 40);
             read(server_fd, notif_pipe, 40);
             
