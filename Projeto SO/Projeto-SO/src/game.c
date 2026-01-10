@@ -82,6 +82,22 @@ int extract_id_from_pipe(const char *pipe_path) {
     return id;
 }
 
+// Função auxiliar para garantir leitura completa de strings (evita lixo de memória)
+int read_exact_server(int fd, void *buffer, size_t count) {
+    size_t total_read = 0;
+    char *buf_ptr = (char *)buffer;
+    while (total_read < count) {
+        ssize_t n = read(fd, buf_ptr + total_read, count - total_read);
+        if (n == -1) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (n == 0) return -1; 
+        total_read += n;
+    }
+    return 0;
+}
+
 void generate_top5_file() {
     FILE *f = fopen("top_scores.txt", "w");
     if (!f) return;
@@ -544,7 +560,10 @@ int main(int argc, char** argv) {
             continue; 
         }
 
-        char op, req_pipe[40], notif_pipe[40];
+        char op;
+        char req_pipe[40] = {0}; 
+        char notif_pipe[40] = {0};
+
         int n = read(server_fd, &op, 1);
         
         if (n == -1 && errno == EINTR) {
@@ -557,17 +576,19 @@ int main(int argc, char** argv) {
         }
 
         if (n > 0) {
-            read(server_fd, req_pipe, 40);
-            read(server_fd, notif_pipe, 40);
-            
-            if (op == OP_CODE_CONNECT) {
-                sem_wait(&sem_empty);
-                pthread_mutex_lock(&buf_mutex);
-                strncpy(request_buffer[buf_in].req_pipe_path, req_pipe, 40);
-                strncpy(request_buffer[buf_in].notif_pipe_path, notif_pipe, 40);
-                buf_in = (buf_in + 1) % BUFFER_SIZE;
-                pthread_mutex_unlock(&buf_mutex);
-                sem_post(&sem_full);
+            // Usa read_exact_server para evitar lixo de memória
+            if (read_exact_server(server_fd, req_pipe, 40) == 0 &&
+                read_exact_server(server_fd, notif_pipe, 40) == 0) {
+                
+                if (op == OP_CODE_CONNECT) {
+                    sem_wait(&sem_empty);
+                    pthread_mutex_lock(&buf_mutex);
+                    strncpy(request_buffer[buf_in].req_pipe_path, req_pipe, 40);
+                    strncpy(request_buffer[buf_in].notif_pipe_path, notif_pipe, 40);
+                    buf_in = (buf_in + 1) % BUFFER_SIZE;
+                    pthread_mutex_unlock(&buf_mutex);
+                    sem_post(&sem_full);
+                }
             }
         }
         close(server_fd);
