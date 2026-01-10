@@ -679,12 +679,12 @@ int load_level_filename(board_t *board, const char *filename, int points) {
     }
 
     pacman_t *pac = board->pacmans;
-    if (pac->n_moves == 0 || (pac->pos_x == -1 && pac->pos_y == -1)) { 
+    if (pac->pos_x == -1 && pac->pos_y == -1) { 
         find_first_free_pos(board, &pac->pos_x, &pac->pos_y);
         int idx = pac->pos_y * board->width + pac->pos_x;
         if (is_valid_position(board, pac->pos_x, pac->pos_y)) {
             board->board[idx].content = 'P';
-            board->board[idx].has_dot = 0;
+            board->board[idx].has_dot = 0; 
         }
     }
 
