@@ -132,9 +132,11 @@ Use the `W`, `A`, `S`, `D` keys or arrow keys to navigate the Pacman. Press `Q` 
 
 ---
 
-## Authors
+## Authors & Acknowledgments
 
 * **David Vasques** ([@DeastV](https://github.com/DeastV))
 * **Guilherme Marques** ([@marques-jpg](https://github.com/marques-jpg))
 
-*Instituto Superior Técnico — Universidade de Lisboa (2025/2026)*
+Collaborative group project developed for Sistemas Operativos at Instituto Superior Técnico, Universidade de Lisboa.
+
+*Course-Provided Resources:* Game board level templates (`.lvl`) and monster movement scripts (`.m`) in `server/files/` were provided by the Sistemas Operativos teaching staff. The MIT License applies to the distributed multi-client server/client architecture, FIFO IPC, and thread synchronization code.
