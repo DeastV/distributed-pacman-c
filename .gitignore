@@ -1,0 +1,27 @@
+# Compiled Object files
+*.o
+*.obj
+obj/
+
+# Binaries and executables
+bin/
+Pacmanist
+PacmanIST
+client
+
+# Log and debugging files
+*.log
+debug.log
+server_debug.log
+client-debug.log
+
+# Temporary and archive files
+*.zip
+*.tar.gz
+*.swp
+*~
+
+# IDE and Editor files
+.vscode/
+.idea/
+.DS_Store
