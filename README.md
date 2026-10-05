@@ -12,7 +12,7 @@ A distributed, concurrent implementation of the classic Pacman game built in C f
 Developed as part of the **Operating Systems (Sistemas Operativos)** course at **Instituto Superior Técnico (IST), Universidade de Lisboa**.
 
 > [!NOTE]
-> This project represents **Part 2** (Distributed Multi-Client Architecture) of the Sistemas Operativos project. It builds directly upon the single-process multithreaded game engine developed in [Part 1 (Projeto-SO-1)](https://github.com/DeastV/Projeto-SO-1).
+> This project represents **Part 2** (Distributed Multi-Client Architecture) of the Sistemas Operativos project. It builds directly upon the single-process multithreaded game engine developed in [Part 1 (Concurrent Engine)](https://github.com/DeastV/distributed-pacman-c-part1-).
 
 ---
 
