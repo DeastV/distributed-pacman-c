@@ -5,6 +5,7 @@
 [![IPC](https://img.shields.io/badge/IPC-Named%20Pipes%20(FIFOs)-green.svg)]()
 [![Concurrency](https://img.shields.io/badge/Concurrency-POSIX%20Threads-brightgreen.svg)]()
 [![UI](https://img.shields.io/badge/UI-ncurses-yellow.svg)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A distributed, concurrent implementation of the classic Pacman game built in C for POSIX/Linux systems. The project adopts a **Client-Server architecture** using **Named Pipes (FIFOs)** for inter-process communication and **POSIX Threads (`pthread`) with mutexes** for safe concurrent multi-client gameplay.
 
