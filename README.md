@@ -2,9 +2,6 @@
 
 [![Language](https://img.shields.io/badge/Language-C17-blue.svg)](https://en.wikipedia.org/wiki/C17_(C_standard_revision))
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20POSIX-orange.svg)](https://en.wikipedia.org/wiki/POSIX)
-[![IPC](https://img.shields.io/badge/IPC-Named%20Pipes%20(FIFOs)-green.svg)]()
-[![Concurrency](https://img.shields.io/badge/Concurrency-POSIX%20Threads-brightgreen.svg)]()
-[![UI](https://img.shields.io/badge/UI-ncurses-yellow.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A distributed, concurrent implementation of the classic Pacman game built in C for POSIX/Linux systems. The project adopts a **Client-Server architecture** using **Named Pipes (FIFOs)** for inter-process communication and **POSIX Threads (`pthread`) with mutexes** for safe concurrent multi-client gameplay.
@@ -12,27 +9,31 @@ A distributed, concurrent implementation of the classic Pacman game built in C f
 Developed as part of the **Operating Systems (Sistemas Operativos)** course at **Instituto Superior Técnico (IST), Universidade de Lisboa**.
 
 > [!NOTE]
-> This project represents **Part 2** (Distributed Multi-Client Architecture) of the Sistemas Operativos project. It builds directly upon the single-process multithreaded game engine developed in [Part 1 (Concurrent Engine)](https://github.com/DeastV/distributed-pacman-c-part1-).
+> This project represents **Part 2** (Distributed Multi-Client Architecture) of the Sistemas Operativos project. It builds directly upon the single-process multithreaded game engine developed in [Part 1 (Concurrent Engine)](https://github.com/DeastV/distributed-pacman-c-part1).
 
 ---
 
 ## Architecture Overview
 
-```
-                      +---------------------------------------+
-                      |             Game Server               |
-                      |  - Board state & game loop            |
-                      |  - Level & monster path parsing       |
-                      |  - Concurrency: Mutex synchronization |
-                      +---+-------------------------------+---+
-                          ^                               |
-             Keypress IPC |                               | Real-time Board Updates
-             (Req Pipe)   |                               | (Notif Pipe)
-                          |                               v
-           +--------------+------+                 +------+--------------+
-           |   Client 1 (ncurses) |                 |   Client 2 (ncurses) |
-           |   Player Terminal    |                 |   Player Terminal    |
-           +---------------------+                 +---------------------+
+```mermaid
+flowchart TD
+    subgraph Server["Game Server (server/bin/Pacmanist)"]
+        Loop["Game Loop & Board Matrix"]
+        Sync["POSIX Threads & Mutex Synchronization"]
+    end
+
+    subgraph Client1["Client 1 Terminal (ncurses)"]
+        UI1["Display & Input"]
+    end
+
+    subgraph Client2["Client 2 Terminal (ncurses)"]
+        UI2["Display & Input"]
+    end
+
+    UI1 -->|"Keypress IPC (Req Pipe)"| Loop
+    Loop -->|"Board State Updates (Notif Pipe)"| UI1
+    UI2 -->|"Keypress IPC (Req Pipe)"| Loop
+    Loop -->|"Board State Updates (Notif Pipe)"| UI2
 ```
 
 ### Core Features
@@ -132,11 +133,14 @@ Use the `W`, `A`, `S`, `D` keys or arrow keys to navigate the Pacman. Press `Q` 
 
 ---
 
-## Authors & Acknowledgments
+## Known Limitations
 
-* **David Vasques** ([@DeastV](https://github.com/DeastV))
-* **Guilherme Marques** ([@marques-jpg](https://github.com/marques-jpg))
+* **Local Host IPC Boundary:** Communication between game server and client terminals is implemented via POSIX FIFOs (`mkfifo`), binding gameplay processes to the same host OS without network sockets.
+* **Static Terminal Geometry:** The `ncurses` client rendering loop assumes static terminal dimensions; dynamic terminal window resizing during active play is not handled.
 
-Collaborative group project developed for Sistemas Operativos at Instituto Superior Técnico, Universidade de Lisboa.
+---
 
-*Course-Provided Resources:* Game board level templates (`.lvl`) and monster movement scripts (`.m`) in `server/files/` were provided by the Sistemas Operativos teaching staff. The MIT License applies to the distributed multi-client server/client architecture, FIFO IPC, and thread synchronization code.
+## Credits
+
+* **David Vasques** ([@DeastV](https://github.com/DeastV)), **Guilherme Marques** ([@marques-jpg](https://github.com/marques-jpg))
+* Collaborative group coursework developed for Sistemas Operativos at Instituto Superior Técnico, Universidade de Lisboa. Map definitions (`.lvl`) and monster movement scripts (`.m`) provided by the teaching staff.
